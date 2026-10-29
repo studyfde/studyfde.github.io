@@ -10,6 +10,8 @@
     "test": "node --test scripts/build.test.mjs"
   },
   "devDependencies": {
+    "entities": "6.0.1",
+    "github-markdown-css": "5.9.0",
     "marked": "18.0.4"
   }
 }
