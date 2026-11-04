@@ -55,6 +55,8 @@ export function renderPage(markdown) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="msvalidate.01" content="82FBC3E92E411F82740ED620BE5A7DBA" />
+  <meta name="google-site-verification" content="IfEraq8UU0TiEA67mgzJARbrPkJXYs4n18I7llBwom4" />
   <title>${escapeHtml(title)}</title>
   <link rel="stylesheet" href="./github-markdown.css">
   <style>
