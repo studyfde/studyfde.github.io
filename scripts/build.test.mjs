@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { marked } from 'marked';
-import { renderPage } from './build.mjs';
+import { decodeHTML } from 'entities';
+import { homepageMetadata, renderPage } from './build.mjs';
 
 const root = new URL('../', import.meta.url);
 
@@ -70,8 +71,19 @@ test('builds the actual README regardless of the current working directory', asy
   });
   const markdown = await readFile(new URL('README.md', root), 'utf8');
   const html = await readFile(new URL('_site/index.html', root), 'utf8');
-  assert.equal(html, renderPage(markdown));
+  assert.equal(html, renderPage(markdown, homepageMetadata));
   assert.match(html, /href="\.\/github-markdown.css"/);
+  const imagePath = new URL(homepageMetadata.image).pathname.slice(1);
+  assert.deepEqual(
+    await readFile(new URL(`_site/${imagePath}`, root)),
+    await readFile(new URL(imagePath, root)),
+  );
+  for (const filename of ['sitemap.xml', 'robots.txt']) {
+    assert.equal(
+      await readFile(new URL(`_site/${filename}`, root), 'utf8'),
+      await readFile(new URL(filename, root), 'utf8'),
+    );
+  }
   for (const [source, output] of [
     ['github-markdown-light.css', 'github-markdown.css'],
     ['license', 'github-markdown-css.LICENSE'],
@@ -81,6 +93,95 @@ test('builds the actual README regardless of the current working directory', asy
       await readFile(new URL(`node_modules/github-markdown-css/${source}`, root), 'utf8'),
     );
   }
+});
+
+test('lists only the published homepage in the sitemap and advertises it in robots.txt', async () => {
+  const sitemap = await readFile(new URL('sitemap.xml', root), 'utf8');
+  assert.ok(sitemap.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
+  assert.match(sitemap, /<urlset xmlns="http:\/\/www.sitemaps.org\/schemas\/sitemap\/0.9">/);
+  const locations = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+  assert.deepEqual(locations, ['https://studyfde.github.io/']);
+  assert.doesNotMatch(sitemap, /<(?:lastmod|priority|changefreq)\b/);
+
+  const robots = await readFile(new URL('robots.txt', root), 'utf8');
+  assert.match(robots, /^User-agent: \*\r?\nAllow: \/$/m);
+  assert.match(robots, /^Sitemap: https:\/\/studyfde.github.io\/sitemap.xml$/m);
+  assert.doesNotMatch(robots, /^Disallow:\s*\S/m);
+});
+
+function headMetadata(html) {
+  const head = html.match(/<head>([\s\S]*?)<\/head>/)[1];
+  const entries = [...head.matchAll(/<meta (?:name|property)="([^"]+)" content="([^"]*)">/g)]
+    .map(([, name, content]) => [name, decodeHTML(content)]);
+  assert.equal(new Set(entries.map(([name]) => name)).size, entries.length, 'meta tags must not be duplicated');
+  return Object.fromEntries(entries);
+}
+
+test('renders consistent homepage SEO and social metadata without changing content or heading anchors', async () => {
+  const markdown = await readFile(new URL('README.md', root), 'utf8');
+  const html = renderPage(markdown, homepageMetadata);
+  assert.equal(articleContent(html), articleContent(renderPage(markdown)));
+  assert.ok(html.includes(`<title>${homepageMetadata.title}</title>`));
+  const canonicals = [...html.matchAll(/<link rel="canonical" href="([^"]+)">/g)];
+  assert.equal(canonicals.length, 1);
+  assert.equal(canonicals[0][1], homepageMetadata.url);
+  assert.ok((await readFile(new URL('sitemap.xml', root), 'utf8')).includes(`<loc>${homepageMetadata.url}</loc>`));
+
+  const meta = headMetadata(html);
+  const expected = {
+    description: homepageMetadata.description,
+    'og:type': 'website',
+    'og:site_name': 'StudyFDE',
+    'og:locale': 'zh_CN',
+    'og:title': homepageMetadata.title,
+    'og:description': homepageMetadata.description,
+    'og:url': homepageMetadata.url,
+    'og:image': homepageMetadata.image,
+    'og:image:type': 'image/png',
+    'og:image:width': '1200',
+    'og:image:height': '630',
+    'og:image:alt': homepageMetadata.imageAlt,
+    'twitter:card': 'summary_large_image',
+    'twitter:title': homepageMetadata.title,
+    'twitter:description': homepageMetadata.description,
+    'twitter:image': homepageMetadata.image,
+    'twitter:image:alt': homepageMetadata.imageAlt,
+  };
+  for (const [key, value] of Object.entries(expected)) assert.equal(meta[key], value, key);
+  for (const value of [meta['og:url'], meta['og:image'], meta['twitter:image']]) {
+    assert.equal(new URL(value).protocol, 'https:');
+    assert.equal(new URL(value).origin, new URL(homepageMetadata.url).origin);
+  }
+  assert.match(html, /name="msvalidate.01"/);
+  assert.match(html, /name="google-site-verification"/);
+});
+
+test('escapes configurable SEO text and URLs in the document head', () => {
+  const value = 'A & B "quoted" <tag> \'single\'';
+  const url = 'https://example.com/?a=1&b="two"';
+  const html = renderPage('# 正文标题', {
+    title: value, description: value, imageAlt: value, url, image: url,
+  });
+  const meta = headMetadata(html);
+  for (const key of ['description', 'og:title', 'og:description', 'og:image:alt', 'twitter:title', 'twitter:description', 'twitter:image:alt']) {
+    assert.equal(meta[key], value);
+  }
+  assert.equal(meta['og:url'], url);
+  assert.equal(meta['og:image'], url);
+  assert.equal(meta['twitter:image'], url);
+  assert.match(html, /<title>A &amp; B &quot;quoted&quot; &lt;tag&gt; &#39;single&#39;<\/title>/);
+  assert.ok(html.includes('<link rel="canonical" href="https://example.com/?a=1&amp;b=&quot;two&quot;">'));
+  assert.match(articleContent(html), /<h1 id="正文标题">正文标题<\/h1>/);
+});
+
+test('ships a social PNG with the advertised dimensions and a bounded file size', async () => {
+  const path = new URL(homepageMetadata.image).pathname.slice(1);
+  const image = await readFile(new URL(path, root));
+  assert.deepEqual([...image.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal(image.toString('ascii', 12, 16), 'IHDR');
+  assert.equal(image.readUInt32BE(16), 1200);
+  assert.equal(image.readUInt32BE(20), 630);
+  assert.ok(image.length < 200 * 1024, 'social card should stay under 200 KiB');
 });
 
 function desktopToc(html) {

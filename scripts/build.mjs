@@ -3,6 +3,14 @@ import { pathToFileURL } from 'node:url';
 import { Marked } from 'marked';
 import { decodeHTML } from 'entities';
 
+export const homepageMetadata = {
+  title: 'FDE 学习路线：15 阶段企业 AI 项目实战 | StudyFDE',
+  description: '面向开发者和产品经理的中文 FDE 学习指南。围绕企业设备报修与工单项目，分 15 个阶段学习 Python、RAG、Agent、系统集成、需求调研、部署与验收交付，附阶段作业。',
+  url: 'https://studyfde.github.io/',
+  image: 'https://studyfde.github.io/assets/fde-learning-roadmap-1200x630.png',
+  imageAlt: 'StudyFDE 中文实战指南：FDE 学习路线，15 阶段走向企业 AI 交付，面向开发者与产品经理。',
+};
+
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (character) => ({
     '&': '&amp;',
@@ -23,7 +31,7 @@ function headingText(tokens) {
   }).join('');
 }
 
-export function renderPage(markdown) {
+export function renderPage(markdown, metadata = {}) {
   const headings = [];
   const usedIds = new Set(['main-content']);
   const parser = new Marked({
@@ -45,6 +53,7 @@ export function renderPage(markdown) {
   // README is maintained in this repository; raw HTML follows Markdown semantics.
   const content = parser.parse(markdown);
   const title = headings.find((heading) => heading.depth === 1)?.text ?? 'FDE 学习之路';
+  const seo = { ...homepageMetadata, title, ...metadata };
   const chapters = headings.filter(({ depth }) => depth === 2 || depth === 3);
   const navigation = `<nav aria-label="章节目录"><ul class="toc-list">${chapters.map(({ text, depth, id }) =>
     `<li class="toc-level-${depth}"><a href="#${encodeURIComponent(id)}">${escapeHtml(text || '未命名章节')}</a></li>`,
@@ -57,7 +66,25 @@ export function renderPage(markdown) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="msvalidate.01" content="82FBC3E92E411F82740ED620BE5A7DBA" />
   <meta name="google-site-verification" content="IfEraq8UU0TiEA67mgzJARbrPkJXYs4n18I7llBwom4" />
-  <title>${escapeHtml(title)}</title>
+  <title>${escapeHtml(seo.title)}</title>
+  <meta name="description" content="${escapeHtml(seo.description)}">
+  <link rel="canonical" href="${escapeHtml(seo.url)}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="StudyFDE">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:title" content="${escapeHtml(seo.title)}">
+  <meta property="og:description" content="${escapeHtml(seo.description)}">
+  <meta property="og:url" content="${escapeHtml(seo.url)}">
+  <meta property="og:image" content="${escapeHtml(seo.image)}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="${escapeHtml(seo.imageAlt)}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${escapeHtml(seo.title)}">
+  <meta name="twitter:description" content="${escapeHtml(seo.description)}">
+  <meta name="twitter:image" content="${escapeHtml(seo.image)}">
+  <meta name="twitter:image:alt" content="${escapeHtml(seo.imageAlt)}">
   <link rel="stylesheet" href="./github-markdown.css">
   <style>
     :root {
@@ -748,8 +775,13 @@ async function build() {
   await mkdir(output, { recursive: true });
   await copyFile(new URL('node_modules/github-markdown-css/github-markdown-light.css', root), new URL('github-markdown.css', output));
   await copyFile(new URL('node_modules/github-markdown-css/license', root), new URL('github-markdown-css.LICENSE', output));
-  await writeFile(new URL('index.html', output), renderPage(markdown), 'utf8');
-  console.log('Built _site/index.html and GitHub Markdown styles from README.md');
+  await writeFile(new URL('index.html', output), renderPage(markdown, homepageMetadata), 'utf8');
+  await mkdir(new URL('assets/', output), { recursive: true });
+  const imagePath = new URL(homepageMetadata.image).pathname.slice(1);
+  for (const filename of ['sitemap.xml', 'robots.txt', imagePath]) {
+    await copyFile(new URL(filename, root), new URL(filename, output));
+  }
+  console.log('Built _site/index.html, styles, sitemap.xml, robots.txt and social image');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
